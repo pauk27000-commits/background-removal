@@ -35,11 +35,26 @@ let bulkBgColor = '#ffffff';
 let bulkBgGradient = 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)';
 
 // Token Maker state
-let tokenRingType = 'gold'; // 'gold', 'silver', 'cyber', 'obsidian', 'wood', 'runic', 'dragon', 'ice', 'fire'
-let tokenBgType = 'transparent'; // 'transparent', 'color', 'gradient'
+let tokenRingType = 'gold'; // 'gold', 'silver', 'cyber', 'obsidian', 'wood', 'runic', 'custom', 'ice', 'fire'
+let tokenRingColor = '#f59e0b';
+let tokenBgType = 'transparent'; // 'transparent', 'color', 'gradient', 'image'
 let tokenBgColor = '#ffffff';
 let tokenBgGradient = 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)';
+let tokenBgImageFile = null;
+let tokenBgImageURL = '';
 let tokenPopoutEnabled = true;
+const btnTokenEraserToggle = document.getElementById('btn-token-eraser-toggle');
+const tokenEraserBtnText = document.getElementById('token-eraser-btn-text');
+const tokenEraserControls = document.getElementById('token-eraser-controls');
+const tokenEraserSize = document.getElementById('token-eraser-size');
+const btnTokenEraserClear = document.getElementById('btn-token-eraser-clear');
+let isTokenEraserMode = false;
+let isTokenDrawing = false;
+let tokenMaskCanvas = document.createElement('canvas');
+tokenMaskCanvas.width = 600;
+tokenMaskCanvas.height = 600;
+let tokenMaskCtx = tokenMaskCanvas.getContext('2d');
+
 let tokenPopoutHeight = 50; // -50 to 95
 let tokenRingThickness = 12; // 4 to 25
 let tokenRingScaleOnCanvas = 65; // 40 to 90
@@ -51,6 +66,10 @@ let tokenGlowColor = '#10b981';
 let tokenStatusOverlay = 'none'; // 'none', 'blood', 'ice', 'fire', 'poison', 'curse'
 let tokenName = '';
 let tokenSourceScreen = 'studio'; // 'studio' or 'bulk'
+let tokenNoClip = false;
+
+let tokenCutSectorEnabled = false;
+let tokenBgImgObj = null;
 
 let tokenPosX = 0;
 let tokenPosY = 0;
@@ -65,9 +84,9 @@ let tokenCutoutImage = null;
 const ringTextures = {};
 const ringPaths = {
     runic: 'assets/rings/ring_runic.png',
-    dragon: 'assets/rings/ring_dragon.png',
     ice: 'assets/rings/ring_ice.png',
-    fire: 'assets/rings/ring_fire.png'
+    fire: 'assets/rings/ring_fire.png',
+    dragon: 'assets/rings/ring_dragon.png'
 };
 
 // --- DOM Selectors ---
@@ -128,17 +147,39 @@ const bulkTabContents = document.querySelectorAll('.bulk-tab-content');
 const bulkColorGrid = document.getElementById('bulk-color-grid');
 const bulkGradientGrid = document.getElementById('bulk-gradient-grid');
 
+
+// Eraser elements
+const btnEraser = document.getElementById('btn-eraser');
+const eraserModal = document.getElementById('eraser-modal');
+const eraserCanvas = document.getElementById('eraser-canvas');
+const eraserSizeSlider = document.getElementById('eraser-size-slider');
+const btnEraserCancel = document.getElementById('btn-eraser-cancel');
+const btnEraserSave = document.getElementById('btn-eraser-save');
+let isErasing = false;
+let eraserCtx = null;
+let eraserImgObj = null;
+
 // Token elements
 const tokenCanvas = document.getElementById('token-preview-canvas');
-const tokenRingButtons = document.querySelectorAll('.token-ring-grid button');
+const tokenRingSelect = document.getElementById('token-ring-select');
+const tokenRingColorGroup = document.getElementById('token-ring-color-group');
+const tokenRingColorInput = document.getElementById('token-ring-color');
 const tokenBgTabs = document.querySelectorAll('#token-bg-tabs .bg-tab');
+const tokenBgImageZone = document.getElementById('token-bg-image-zone');
+const tokenBgImageInput = document.getElementById('token-bg-image-input');
+const tokenBgImageName = document.getElementById('token-bg-image-name');
+const tokenNoClipToggle = document.getElementById('token-no-clip-toggle');
+const tokenPopoutHeightSlider = document.getElementById('token-popout-height-slider');
+const tokenPopoutHeightVal = document.getElementById('token-popout-height-val');
+const tokenPopoutHeightGroup = document.getElementById('token-popout-height-group');
+const btnTokenEraser = document.getElementById('btn-token-eraser');
+
+const tokenNavTabs = document.querySelectorAll('.token-nav-tab');
+const tokenNavContents = document.querySelectorAll('.token-nav-content');
 const tokenTabContents = document.querySelectorAll('.token-tab-content');
 const tokenColorGrid = document.getElementById('token-color-grid');
 const tokenGradientGrid = document.getElementById('token-gradient-grid');
 const tokenPopoutToggle = document.getElementById('token-popout-toggle');
-const tokenPopoutHeightSlider = document.getElementById('token-popout-height-slider');
-const tokenPopoutHeightVal = document.getElementById('token-popout-height-val');
-const tokenPopoutHeightGroup = document.getElementById('token-popout-height-group');
 const tokenThicknessSlider = document.getElementById('token-thickness-slider');
 const tokenThicknessVal = document.getElementById('token-thickness-val');
 const tokenRingScaleSlider = document.getElementById('token-ring-scale-slider');
@@ -415,7 +456,7 @@ function initCompareSlider() {
         
         const percent = (x / rect.width) * 100;
         sliderHandle.style.left = `${percent}%`;
-        layerOriginal.style.width = `${percent}%`;
+        layerOriginal.style.clipPath = `polygon(0 0, ${percent}% 0, ${percent}% 100%, 0 100%)`;
         compareSliderPos = percent;
     };
     
@@ -503,6 +544,12 @@ async function handleSingleFile(file) {
     originalImageURL = URL.createObjectURL(file);
     imgOriginal.src = originalImageURL;
     
+    const exportFilenameInput = document.getElementById('export-filename');
+const exportFilenameTemplate = document.getElementById('export-filename-template');
+    if (exportFilenameInput) {
+        exportFilenameInput.value = `${filenamePrefix}_no_bg`;
+    }
+    
     showOverlay('Инициализация нейросети...', 0);
     
     try {
@@ -567,6 +614,7 @@ function setActiveBgTab(type) {
         customBgLayer.classList.add('hidden');
         workspaceLayer.classList.add('hidden');
         layerOriginal.classList.remove('hidden');
+        layerProcessed.classList.remove('hidden');
         sliderHandle.classList.remove('hidden');
         document.getElementById('badge-original').classList.remove('hidden');
         document.getElementById('badge-processed').classList.remove('hidden');
@@ -575,6 +623,7 @@ function setActiveBgTab(type) {
         customBgLayer.classList.remove('hidden');
         workspaceLayer.classList.remove('hidden');
         layerOriginal.classList.add('hidden');
+        layerProcessed.classList.add('hidden');
         sliderHandle.classList.add('hidden');
         document.getElementById('badge-original').classList.add('hidden');
         document.getElementById('badge-processed').classList.add('hidden');
@@ -674,7 +723,10 @@ btnDownload.addEventListener('click', async () => {
     showOverlay('Подготовка файла к скачиванию...', 0);
     try {
         const finalURL = await applyBackgroundToCutout(processedImageURL, bgType, bgColor, bgGradient);
-        downloadURL(finalURL, `bgrem-${filenamePrefix}.png`);
+        const customNameInput = document.getElementById('export-filename');
+        let finalName = customNameInput && customNameInput.value.trim() !== '' ? customNameInput.value.trim() : `bgrem-${filenamePrefix}`;
+        if (!finalName.toLowerCase().endsWith('.png')) finalName += '.png';
+        downloadURL(finalURL, finalName);
         hideOverlay();
         showToast('Изображение успешно скачано!');
     } catch (e) {
@@ -986,30 +1038,7 @@ function drawToken(canvas, width, height, isExport = false) {
     const scaleFactor = isExport ? (width / 600) : 1;
     const thickness = r * (tokenRingThickness / 100);
 
-    // 1. Draw Outer Glow (if enabled)
-    if (tokenGlowEnabled && tokenGlowRadius > 0) {
-        ctx.save();
-        ctx.shadowColor = tokenGlowColor;
-        ctx.shadowBlur = tokenGlowRadius * scaleFactor * 1.5;
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(cx, cy, r + thickness, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = (tokenGlowRadius / 2) * scaleFactor * 1.5;
-        ctx.fill();
-        ctx.restore();
-
-        // Clear the inside so it's a true outer glow
-        ctx.save();
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.fillStyle = '#000000';
-        ctx.beginPath();
-        ctx.arc(cx, cy, r + thickness - 1, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
-
-    // 2. Draw Token background inside the circle
+    // 1. Draw Token background inside the circle
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -1020,359 +1049,222 @@ function drawToken(canvas, width, height, isExport = false) {
         ctx.fill();
     } else if (tokenBgType === 'gradient') {
         let gradColors = ['#ff9a9e', '#fecfef'];
-        if (tokenBgGradient.includes('#2b5876')) gradColors = ['#2b5876', '#4e4376'];
-        else if (tokenBgGradient.includes('#02aab0')) gradColors = ['#02aab0', '#00cdac'];
-        else if (tokenBgGradient.includes('#f83600')) gradColors = ['#f83600', '#f9d423'];
-        else if (tokenBgGradient.includes('#7028e4')) gradColors = ['#7028e4', '#e5b2ca'];
-        else if (tokenBgGradient.includes('#e0c3fc')) gradColors = ['#e0c3fc', '#8ec5fc'];
+        if (tokenBgGradient && tokenBgGradient.includes('#2b5876')) gradColors = ['#2b5876', '#4e4376'];
+        else if (tokenBgGradient && tokenBgGradient.includes('#02aab0')) gradColors = ['#02aab0', '#00cdac'];
+        else if (tokenBgGradient && tokenBgGradient.includes('#f83600')) gradColors = ['#f83600', '#f9d423'];
+        else if (tokenBgGradient && tokenBgGradient.includes('#7028e4')) gradColors = ['#7028e4', '#e5b2ca'];
+        else if (tokenBgGradient && tokenBgGradient.includes('#e0c3fc')) gradColors = ['#e0c3fc', '#8ec5fc'];
         
         const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
         grad.addColorStop(0, gradColors[0]);
         grad.addColorStop(1, gradColors[1]);
         ctx.fillStyle = grad;
         ctx.fill();
+    } else if (tokenBgType === 'image' && tokenBgImgObj) {
+        ctx.save();
+        ctx.clip();
+        const imgScale = Math.max(r * 2 / tokenBgImgObj.width, r * 2 / tokenBgImgObj.height);
+        const dw = tokenBgImgObj.width * imgScale;
+        const dh = tokenBgImgObj.height * imgScale;
+        ctx.drawImage(tokenBgImgObj, cx - dw / 2, cy - dh / 2, dw, dh);
+        ctx.restore();
     }
     ctx.restore();
 
-    // 3. Draw Character (clipped inside circle)
+    // 2. Prepare Character on temporary canvas (to apply eraser mask strictly to character only)
+    let tempCanvas = null;
     if (tokenCutoutImage) {
-        ctx.save();
+        tempCanvas = document.createElement('canvas');
+        tempCanvas.width = width;
+        tempCanvas.height = height;
+        const tempCtx = tempCanvas.getContext('2d');
         
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.clip();
-        
-        ctx.translate(cx + tokenPosX * scaleFactor, cy + tokenPosY * scaleFactor);
-        ctx.rotate((tokenRotate * Math.PI) / 180);
+        tempCtx.save();
+        tempCtx.translate(cx + tokenPosX * scaleFactor, cy + tokenPosY * scaleFactor);
+        if (typeof tokenRotate !== 'undefined') tempCtx.rotate((tokenRotate * Math.PI) / 180);
         
         const imgScale = (tokenScale / 100) * (r * 2 / Math.min(tokenCutoutImage.width, tokenCutoutImage.height));
-        const dw = tokenCutoutImage.width * imgScale;
-        const dh = tokenCutoutImage.height * imgScale;
-        ctx.drawImage(tokenCutoutImage, -dw / 2, -dh / 2, dw, dh);
+        const drawW = tokenCutoutImage.width * imgScale;
+        const drawH = tokenCutoutImage.height * imgScale;
+        const drawX = -drawW / 2;
+        const drawY = -drawH / 2;
         
-        ctx.restore();
+        tempCtx.drawImage(tokenCutoutImage, drawX, drawY, drawW, drawH);
+        tempCtx.restore();
+        
+        // Apply Eraser Mask strictly to character
+        if (typeof tokenMaskCanvas !== 'undefined' && tokenMaskCanvas) {
+            tempCtx.save();
+            tempCtx.globalCompositeOperation = 'destination-out';
+            tempCtx.drawImage(tokenMaskCanvas, 0, 0, width, height);
+            tempCtx.restore();
+        }
     }
 
-    // 4. Draw Ring (Frame)
-    ctx.save();
-    const isCustomRing = ['runic', 'dragon', 'ice', 'fire'].includes(tokenRingType);
-    if (isCustomRing && ringTextures[tokenRingType]) {
-        const texture = ringTextures[tokenRingType];
-        const outerRadius = r + thickness;
-        ctx.drawImage(texture, cx - outerRadius, cy - outerRadius, outerRadius * 2, outerRadius * 2);
-    } else {
-        // Procedural vector rings: gold, silver, cyber, obsidian, wood
-        ctx.beginPath();
-        ctx.arc(cx, cy, r + thickness / 2, 0, Math.PI * 2);
-        ctx.lineWidth = thickness;
-        
-        if (tokenRingType === 'gold') {
-            const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-            grad.addColorStop(0, '#ffe066');
-            grad.addColorStop(0.3, '#f59e0b');
-            grad.addColorStop(0.5, '#fffbeb');
-            grad.addColorStop(0.7, '#d97706');
-            grad.addColorStop(1, '#ffe066');
-            ctx.strokeStyle = grad;
-            ctx.stroke();
-            
-            ctx.lineWidth = 1.5 * scaleFactor;
-            ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    // Draw Character (clipped inside circle)
+    if (tempCanvas) {
+        ctx.save();
+        if (!tokenNoClip) {
             ctx.beginPath();
             ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(cx, cy, r + thickness, 0, Math.PI * 2);
-            ctx.stroke();
-        } else if (tokenRingType === 'silver') {
-            const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-            grad.addColorStop(0, '#f3f4f6');
-            grad.addColorStop(0.3, '#9ca3af');
-            grad.addColorStop(0.5, '#ffffff');
-            grad.addColorStop(0.7, '#4b5563');
-            grad.addColorStop(1, '#f3f4f6');
-            ctx.strokeStyle = grad;
-            ctx.stroke();
-            
-            ctx.lineWidth = 1.5 * scaleFactor;
-            ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(cx, cy, r + thickness, 0, Math.PI * 2);
-            ctx.stroke();
-        } else if (tokenRingType === 'cyber') {
-            ctx.strokeStyle = '#6366f1';
-            ctx.stroke();
-            ctx.lineWidth = 2 * scaleFactor;
-            ctx.strokeStyle = '#a5b4fc';
+            ctx.clip();
+        }
+        ctx.drawImage(tempCanvas, 0, 0);
+        ctx.restore();
+
+        // 3. Draw Ring
+        ctx.save();
+        if (ringTextures[tokenRingType]) {
+            const ringSize = r * 2.9411; // 2 * r / 0.68
+            ctx.drawImage(ringTextures[tokenRingType], cx - ringSize / 2, cy - ringSize / 2, ringSize, ringSize);
+        } else {
+            ctx.lineWidth = thickness;
+            ctx.lineCap = 'round';
             ctx.beginPath();
             ctx.arc(cx, cy, r + thickness / 2, 0, Math.PI * 2);
-            ctx.stroke();
-        } else if (tokenRingType === 'obsidian') {
-            const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-            grad.addColorStop(0, '#111827');
-            grad.addColorStop(0.5, '#374151');
-            grad.addColorStop(1, '#030712');
-            ctx.strokeStyle = grad;
-            ctx.stroke();
-            ctx.lineWidth = 1 * scaleFactor;
-            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.stroke();
-        } else if (tokenRingType === 'wood') {
-            const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-            grad.addColorStop(0, '#78350f');
-            grad.addColorStop(0.5, '#b45309');
-            grad.addColorStop(1, '#451a03');
-            ctx.strokeStyle = grad;
-            ctx.stroke();
-        }
-    }
-    ctx.restore();
-
-    // 5. Draw 3D Popout (if enabled)
-    const Ycut = cy + r * (tokenPopoutHeight / 100);
-    
-    if (tokenPopoutEnabled && tokenCutoutImage) {
-        ctx.save();
-        
-        ctx.beginPath();
-        ctx.rect(0, 0, width, Ycut);
-        ctx.clip();
-        
-        ctx.translate(cx + tokenPosX * scaleFactor, cy + tokenPosY * scaleFactor);
-        ctx.rotate((tokenRotate * Math.PI) / 180);
-        
-        const imgScale = (tokenScale / 100) * (r * 2 / Math.min(tokenCutoutImage.width, tokenCutoutImage.height));
-        const dw = tokenCutoutImage.width * imgScale;
-        const dh = tokenCutoutImage.height * imgScale;
-        ctx.drawImage(tokenCutoutImage, -dw / 2, -dh / 2, dw, dh);
-        
-        ctx.restore();
-    }
-
-    // 6. Draw Status Effects (Procedural overlays, clipped inside circle)
-    if (tokenStatusOverlay !== 'none') {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.clip();
-
-        if (tokenStatusOverlay === 'blood') {
-            ctx.fillStyle = 'rgba(185, 28, 28, 0.4)';
-            ctx.strokeStyle = 'rgba(153, 27, 27, 0.8)';
-            ctx.lineWidth = 3 * scaleFactor;
             
-            ctx.beginPath();
-            ctx.moveTo(cx - r*0.7, cy - r*0.2);
-            ctx.lineTo(cx - r*0.2, cy + r*0.3);
-            ctx.stroke();
-            
-            ctx.beginPath();
-            ctx.moveTo(cx - r*0.6, cy - r*0.1);
-            ctx.lineTo(cx - r*0.15, cy + r*0.4);
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.arc(cx - r*0.4, cy + r*0.2, 8 * scaleFactor, 0, Math.PI*2);
-            ctx.arc(cx + r*0.5, cy - r*0.3, 12 * scaleFactor, 0, Math.PI*2);
-            ctx.arc(cx + r*0.3, cy + r*0.5, 15 * scaleFactor, 0, Math.PI*2);
-            ctx.fill();
-            
-            ctx.fillStyle = 'rgba(239, 68, 68, 0.6)';
-            ctx.beginPath();
-            ctx.arc(cx + r*0.35, cy + r*0.55, 6 * scaleFactor, 0, Math.PI*2);
-            ctx.arc(cx + r*0.2, cy + r*0.42, 4 * scaleFactor, 0, Math.PI*2);
-            ctx.fill();
-        } else if (tokenStatusOverlay === 'ice') {
-            const numPoints = 16;
-            ctx.fillStyle = 'rgba(147, 197, 253, 0.35)';
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.lineWidth = 1.5 * scaleFactor;
-            
-            ctx.beginPath();
-            for (let i = 0; i <= numPoints; i++) {
-                const angle = (i / numPoints) * Math.PI * 2;
-                const distOffset = r * (0.8 + 0.1 * Math.sin(angle * 5));
-                const px = cx + Math.cos(angle) * distOffset;
-                const py = cy + Math.sin(angle) * distOffset;
-                if (i === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
-            }
-            ctx.closePath();
-            ctx.fill();
-            
-            ctx.beginPath();
-            ctx.moveTo(cx - r*0.8, cy + r*0.6);
-            ctx.lineTo(cx - r*0.6, cy + r*0.3);
-            ctx.lineTo(cx - r*0.4, cy + r*0.7);
-            
-            ctx.moveTo(cx + r*0.7, cy + r*0.5);
-            ctx.lineTo(cx + r*0.5, cy + r*0.1);
-            ctx.lineTo(cx + r*0.3, cy + r*0.6);
-            ctx.stroke();
-            ctx.fillStyle = 'rgba(219, 234, 254, 0.5)';
-            ctx.fill();
-        } else if (tokenStatusOverlay === 'fire') {
-            const grad = ctx.createLinearGradient(cx, cy + r, cx, cy - r*0.2);
-            grad.addColorStop(0, 'rgba(239, 68, 68, 0.8)');
-            grad.addColorStop(0.5, 'rgba(249, 115, 22, 0.6)');
-            grad.addColorStop(1, 'rgba(253, 224, 71, 0)');
-            
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.moveTo(cx - r, cy + r);
-            ctx.quadraticCurveTo(cx - r*0.7, cy + r*0.2, cx - r*0.5, cy - r*0.1);
-            ctx.quadraticCurveTo(cx - r*0.3, cy + r*0.3, cx, cy - r*0.3);
-            ctx.quadraticCurveTo(cx + r*0.3, cy + r*0.2, cx + r*0.6, cy - r*0.05);
-            ctx.quadraticCurveTo(cx + r*0.8, cy + r*0.4, cx + r, cy + r);
-            ctx.closePath();
-            ctx.fill();
-        } else if (tokenStatusOverlay === 'poison') {
-            ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
-            ctx.strokeStyle = 'rgba(52, 211, 153, 0.7)';
-            ctx.lineWidth = 1 * scaleFactor;
-            
-            const bubbles = [
-                { x: cx - r*0.5, y: cy + r*0.4, size: 12 },
-                { x: cx - r*0.3, y: cy + r*0.6, size: 8 },
-                { x: cx + r*0.2, y: cy + r*0.5, size: 16 },
-                { x: cx + r*0.5, y: cy + r*0.3, size: 10 },
-                { x: cx - r*0.1, y: cy + r*0.2, size: 6 },
-                { x: cx + r*0.4, y: cy + r*0.6, size: 14 }
-            ];
-            
-            bubbles.forEach(b => {
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, b.size * scaleFactor, 0, Math.PI*2);
-                ctx.fill();
+            if (tokenRingType === 'gold') {
+                const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+                grad.addColorStop(0, '#ffe066');
+                grad.addColorStop(0.3, '#f59e0b');
+                grad.addColorStop(0.5, '#fffbeb');
+                grad.addColorStop(0.7, '#d97706');
+                grad.addColorStop(1, '#ffe066');
+                ctx.strokeStyle = grad;
                 ctx.stroke();
                 
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.lineWidth = 1.5 * scaleFactor;
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
                 ctx.beginPath();
-                ctx.arc(b.x - b.size*0.3 * scaleFactor, b.y - b.size*0.3 * scaleFactor, b.size*0.2 * scaleFactor, 0, Math.PI*2);
-                ctx.fill();
-                ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
-            });
-        } else if (tokenStatusOverlay === 'curse') {
-            const grad = ctx.createRadialGradient(cx, cy, r*0.1, cx, cy, r);
-            grad.addColorStop(0, 'rgba(124, 58, 237, 0)');
-            grad.addColorStop(0.7, 'rgba(124, 58, 237, 0.25)');
-            grad.addColorStop(1, 'rgba(88, 28, 135, 0.6)');
-            
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI*2);
-            ctx.fill();
-            
-            ctx.strokeStyle = 'rgba(196, 181, 253, 0.8)';
-            ctx.lineWidth = 2 * scaleFactor;
-            
-            const drawCross = (x, y, size) => {
-                ctx.beginPath();
-                ctx.moveTo(x - size, y);
-                ctx.lineTo(x + size, y);
-                ctx.moveTo(x, y - size);
-                ctx.lineTo(x, y + size*1.5);
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
                 ctx.stroke();
-            };
+                ctx.beginPath();
+                ctx.arc(cx, cy, r + thickness, 0, Math.PI * 2);
+                ctx.stroke();
+            } else if (tokenRingType === 'silver') {
+                const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+                grad.addColorStop(0, '#f3f4f6');
+                grad.addColorStop(0.3, '#9ca3af');
+                grad.addColorStop(0.5, '#ffffff');
+                grad.addColorStop(0.7, '#4b5563');
+                grad.addColorStop(1, '#f3f4f6');
+                ctx.strokeStyle = grad;
+                ctx.stroke();
+                
+                ctx.lineWidth = 1.5 * scaleFactor;
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(cx, cy, r + thickness, 0, Math.PI * 2);
+                ctx.stroke();
+            } else if (tokenRingType === 'cyber') {
+                ctx.strokeStyle = '#6366f1';
+                ctx.stroke();
+                ctx.lineWidth = 2 * scaleFactor;
+                ctx.strokeStyle = '#a5b4fc';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r + thickness / 2, 0, Math.PI * 2);
+                ctx.stroke();
+            } else if (tokenRingType === 'obsidian') {
+                const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+                grad.addColorStop(0, '#111827');
+                grad.addColorStop(0.5, '#374151');
+                grad.addColorStop(1, '#030712');
+                ctx.strokeStyle = grad;
+                ctx.stroke();
+                ctx.lineWidth = 1 * scaleFactor;
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.stroke();
+            } else if (tokenRingType === 'wood') {
+                const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+                grad.addColorStop(0, '#78350f');
+                grad.addColorStop(0.5, '#b45309');
+                grad.addColorStop(1, '#451a03');
+                ctx.strokeStyle = grad;
+                ctx.stroke();
+            } else if (tokenRingType === 'custom') {
+                ctx.strokeStyle = typeof tokenRingColor !== 'undefined' ? tokenRingColor : '#f59e0b';
+                ctx.stroke();
+                ctx.lineWidth = 1 * scaleFactor;
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(cx, cy, r + thickness, 0, Math.PI * 2);
+                ctx.stroke();
+            } else {
+                ctx.strokeStyle = '#9ca3af';
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+
+        // 4. Draw outer Cutout Popout
+        if (tempCanvas && (tokenPopoutEnabled || tokenNoClip)) {
+            ctx.save();
             
-            drawCross(cx - r*0.4, cy - r*0.3, 8 * scaleFactor);
-            drawCross(cx + r*0.5, cy + r*0.2, 10 * scaleFactor);
-            drawCross(cx - r*0.2, cy + r*0.5, 6 * scaleFactor);
+            if (!tokenNoClip) {
+                ctx.beginPath();
+                // Height slider: 0 = everything cut, 100 = nothing cut
+                let hVal = typeof tokenPopoutHeight !== 'undefined' ? tokenPopoutHeight : 50;
+                let rectHeight = cy - r + (r * 2) * ((100 - hVal) / 100);
+                
+                ctx.rect(0, 0, width, rectHeight);
+                ctx.clip();
+            }
+            
+            ctx.drawImage(tempCanvas, 0, 0);
+            ctx.restore();
         }
-
-        ctx.restore();
-    }
-
-    // 7. Draw Character Nameplate Banner
-    if (tokenName && tokenName.trim().length > 0) {
-        ctx.save();
-        
-        const nameStr = tokenName.trim().toUpperCase();
-        const fontSize = Math.max(12, Math.floor(r * 0.13)) * scaleFactor;
-        ctx.font = `800 ${fontSize}px 'Outfit', 'Inter', sans-serif`;
-        
-        const textWidth = ctx.measureText(nameStr).width;
-        const bannerPaddingX = 16 * scaleFactor;
-        const bannerPaddingY = 6 * scaleFactor;
-        const bannerW = Math.min(r * 1.7, textWidth + bannerPaddingX * 2);
-        const bannerH = fontSize + bannerPaddingY * 2;
-        
-        const bannerX = cx - bannerW / 2;
-        const bannerY = cy + r * 0.78 - bannerH / 2;
-        
-        // Clip to inner circle
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.clip();
-        
-        ctx.shadowColor = 'rgba(0,0,0,0.6)';
-        ctx.shadowBlur = 8 * scaleFactor;
-        ctx.shadowOffsetY = 2 * scaleFactor;
-        
-        ctx.fillStyle = 'rgba(10, 12, 20, 0.85)';
-        
-        const radius = bannerH / 2;
-        ctx.beginPath();
-        ctx.moveTo(bannerX + radius, bannerY);
-        ctx.lineTo(bannerX + bannerW - radius, bannerY);
-        ctx.quadraticCurveTo(bannerX + bannerW, bannerY, bannerX + bannerW, bannerY + radius);
-        ctx.lineTo(bannerX + bannerW, bannerY + bannerH - radius);
-        ctx.quadraticCurveTo(bannerX + bannerW, bannerY + bannerH, bannerX + bannerW - radius, bannerY + bannerH);
-        ctx.lineTo(bannerX + radius, bannerY + bannerH);
-        ctx.quadraticCurveTo(bannerX, bannerY + bannerH, bannerX, bannerY + bannerH - radius);
-        ctx.lineTo(bannerX, bannerY + radius);
-        ctx.quadraticCurveTo(bannerX, bannerY, bannerX + radius, bannerY);
-        ctx.closePath();
-        ctx.fill();
-        
-        ctx.shadowColor = 'transparent';
-        ctx.lineWidth = 1 * scaleFactor;
-        
-        if (tokenRingType === 'gold') {
-            ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
-        } else if (tokenRingType === 'silver') {
-            ctx.strokeStyle = 'rgba(156, 163, 175, 0.5)';
-        } else if (tokenRingType === 'cyber') {
-            ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)';
-        } else {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        }
-        ctx.stroke();
-        
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(bannerX + bannerPaddingX, bannerY, bannerW - bannerPaddingX * 2, bannerH);
-        ctx.clip();
-        ctx.fillText(nameStr, cx, bannerY + bannerH / 2 + 1 * scaleFactor);
-        ctx.restore();
-        
-        ctx.restore();
     }
 }
 
-// Token Drag handlers
+// Helper for token coordinates
+function getTokenCanvasPos(clientX, clientY) {
+    const rect = tokenCanvas.getBoundingClientRect();
+    const scaleX = 600 / rect.width;
+    const scaleY = 600 / rect.height;
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+// Token Drag & Eraser handlers
 tokenCanvas.addEventListener('mousedown', (e) => {
     e.preventDefault();
-    const rect = tokenCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    tokenIsDragging = true;
-    tokenDragStartX = x - tokenPosX;
-    tokenDragStartY = y - tokenPosY;
+    if (isTokenEraserMode) {
+        isTokenDrawing = true;
+        const pos = getTokenCanvasPos(e.clientX, e.clientY);
+        tokenMaskCtx.beginPath();
+        tokenMaskCtx.moveTo(pos.x, pos.y);
+        tokenMaskCtx.lineWidth = parseInt(tokenEraserSize.value);
+        tokenMaskCtx.lineCap = 'round';
+        tokenMaskCtx.lineJoin = 'round';
+        tokenMaskCtx.strokeStyle = 'rgba(0,0,0,1)';
+    } else {
+        const rect = tokenCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        tokenIsDragging = true;
+        tokenDragStartX = x - tokenPosX;
+        tokenDragStartY = y - tokenPosY;
+    }
 });
 
 window.addEventListener('mousemove', (e) => {
-    if (tokenIsDragging) {
+    if (isTokenEraserMode && isTokenDrawing) {
+        const pos = getTokenCanvasPos(e.clientX, e.clientY);
+        tokenMaskCtx.lineTo(pos.x, pos.y);
+        tokenMaskCtx.stroke();
+        drawToken(tokenCanvas, 600, 600);
+    } else if (tokenIsDragging) {
         const rect = tokenCanvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
@@ -1384,47 +1276,136 @@ window.addEventListener('mousemove', (e) => {
 });
 
 window.addEventListener('mouseup', () => {
+    if (isTokenDrawing) {
+        isTokenDrawing = false;
+        tokenMaskCtx.closePath();
+    }
     tokenIsDragging = false;
 });
 
-// Touch support for Token drag
+// Touch support for Token drag & eraser
 tokenCanvas.addEventListener('touchstart', (e) => {
     if (e.touches[0]) {
-        const rect = tokenCanvas.getBoundingClientRect();
-        const x = e.touches[0].clientX - rect.left;
-        const y = e.touches[0].clientY - rect.top;
-        
-        tokenIsDragging = true;
-        tokenDragStartX = x - tokenPosX;
-        tokenDragStartY = y - tokenPosY;
+        e.preventDefault();
+        const clientX = e.touches[0].clientX;
+        const clientY = e.touches[0].clientY;
+        if (isTokenEraserMode) {
+            isTokenDrawing = true;
+            const pos = getTokenCanvasPos(clientX, clientY);
+            tokenMaskCtx.beginPath();
+            tokenMaskCtx.moveTo(pos.x, pos.y);
+            tokenMaskCtx.lineWidth = parseInt(tokenEraserSize.value);
+            tokenMaskCtx.lineCap = 'round';
+            tokenMaskCtx.lineJoin = 'round';
+            tokenMaskCtx.strokeStyle = 'rgba(0,0,0,1)';
+        } else {
+            const rect = tokenCanvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+            
+            tokenIsDragging = true;
+            tokenDragStartX = x - tokenPosX;
+            tokenDragStartY = y - tokenPosY;
+        }
     }
-});
+}, { passive: false });
 
 window.addEventListener('touchmove', (e) => {
-    if (tokenIsDragging && e.touches[0]) {
-        const rect = tokenCanvas.getBoundingClientRect();
-        const x = e.touches[0].clientX - rect.left;
-        const y = e.touches[0].clientY - rect.top;
-        
-        tokenPosX = x - tokenDragStartX;
-        tokenPosY = y - tokenDragStartY;
-        drawToken(tokenCanvas, 600, 600);
+    if (e.touches[0]) {
+        const clientX = e.touches[0].clientX;
+        const clientY = e.touches[0].clientY;
+        if (isTokenEraserMode && isTokenDrawing) {
+            e.preventDefault();
+            const pos = getTokenCanvasPos(clientX, clientY);
+            tokenMaskCtx.lineTo(pos.x, pos.y);
+            tokenMaskCtx.stroke();
+            drawToken(tokenCanvas, 600, 600);
+        } else if (tokenIsDragging) {
+            const rect = tokenCanvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+            
+            tokenPosX = x - tokenDragStartX;
+            tokenPosY = y - tokenDragStartY;
+            drawToken(tokenCanvas, 600, 600);
+        }
     }
-});
+}, { passive: false });
 
 window.addEventListener('touchend', () => {
+    if (isTokenDrawing) {
+        isTokenDrawing = false;
+        tokenMaskCtx.closePath();
+    }
     tokenIsDragging = false;
 });
 
 // Token controls listeners
-tokenRingButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-        tokenRingButtons.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        tokenRingType = btn.dataset.ring;
+if (tokenRingSelect) {
+    tokenRingSelect.addEventListener('change', (e) => {
+        tokenRingType = e.target.value;
+        if (tokenRingType === 'custom') {
+            tokenRingColorGroup.style.display = 'flex';
+        } else {
+            tokenRingColorGroup.style.display = 'none';
+        }
         drawToken(tokenCanvas, 600, 600);
     });
+}
+if (tokenRingColorInput) {
+    tokenRingColorInput.addEventListener('input', (e) => {
+        tokenRingColor = e.target.value;
+        drawToken(tokenCanvas, 600, 600);
+    });
+}
+
+
+if (tokenPopoutHeightSlider) {
+    tokenPopoutHeightSlider.addEventListener('input', (e) => {
+        tokenPopoutHeight = parseInt(e.target.value);
+        tokenPopoutHeightVal.textContent = tokenPopoutHeight + '%';
+        drawToken(tokenCanvas, 600, 600);
+    });
+}
+
+
+tokenNavTabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const nav = btn.dataset.nav;
+        tokenNavTabs.forEach(b => {
+            if (b === btn) {
+                b.classList.add('active');
+                b.style.borderBottomColor = 'var(--primary)';
+                b.style.color = 'white';
+            } else {
+                b.classList.remove('active');
+                b.style.borderBottomColor = 'transparent';
+                b.style.color = 'var(--color-text-muted)';
+            }
+        });
+        
+        tokenNavContents.forEach(content => {
+            if (content.id === 'nav-' + nav) content.style.display = 'block';
+            else content.style.display = 'none';
+        });
+    });
 });
+
+if (tokenBgImageZone) {
+    tokenBgImageZone.addEventListener('click', () => tokenBgImageInput.click());
+    tokenBgImageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            tokenBgImageFile = file;
+            tokenBgImageName.textContent = file.name;
+            tokenBgImageName.classList.remove('hidden');
+            tokenBgImageURL = URL.createObjectURL(file);
+            tokenBgImgObj = new Image();
+            tokenBgImgObj.onload = () => drawToken(tokenCanvas, 600, 600);
+            tokenBgImgObj.src = tokenBgImageURL;
+        }
+    });
+}
 
 tokenBgTabs.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1446,17 +1427,10 @@ tokenBgTabs.forEach(btn => {
 // Popout controls
 tokenPopoutToggle.addEventListener('change', (e) => {
     tokenPopoutEnabled = e.target.checked;
-    if (tokenPopoutEnabled) {
-        tokenPopoutHeightGroup.style.display = 'block';
-    } else {
-        tokenPopoutHeightGroup.style.display = 'none';
+    const tokenPopoutControls = document.getElementById('token-popout-controls');
+    if (tokenPopoutControls) {
+        tokenPopoutControls.style.display = tokenPopoutEnabled ? 'block' : 'none';
     }
-    drawToken(tokenCanvas, 600, 600);
-});
-
-tokenPopoutHeightSlider.addEventListener('input', (e) => {
-    tokenPopoutHeight = e.target.value;
-    tokenPopoutHeightVal.textContent = `${tokenPopoutHeight}%`;
     drawToken(tokenCanvas, 600, 600);
 });
 
@@ -1496,38 +1470,35 @@ btnTokenReset.addEventListener('click', () => {
     drawToken(tokenCanvas, 600, 600);
 });
 
-// Glow controls
-tokenGlowToggle.addEventListener('change', (e) => {
-    tokenGlowEnabled = e.target.checked;
-    if (tokenGlowEnabled) {
-        tokenGlowControls.style.display = 'block';
-    } else {
-        tokenGlowControls.style.display = 'none';
-    }
-    drawToken(tokenCanvas, 600, 600);
-});
 
-tokenGlowColorInput.addEventListener('input', (e) => {
-    tokenGlowColor = e.target.value;
-    drawToken(tokenCanvas, 600, 600);
-});
+if (tokenNoClipToggle) {
+    tokenNoClipToggle.addEventListener('change', (e) => {
+        tokenNoClip = e.target.checked;
+        drawToken(tokenCanvas, 600, 600);
+    });
+}
 
-tokenGlowRadiusSlider.addEventListener('input', (e) => {
-    tokenGlowRadius = e.target.value;
-    tokenGlowRadiusVal.textContent = `${tokenGlowRadius}px`;
-    drawToken(tokenCanvas, 600, 600);
-});
 
-// Status Overlay & Name
-tokenStatusOverlaySelect.addEventListener('change', (e) => {
-    tokenStatusOverlay = e.target.value;
-    drawToken(tokenCanvas, 600, 600);
-});
-
-tokenNameInput.addEventListener('input', (e) => {
-    tokenName = e.target.value;
-    drawToken(tokenCanvas, 600, 600);
-});
+if (btnTokenEraserToggle) {
+    btnTokenEraserToggle.addEventListener('click', () => {
+        isTokenEraserMode = !isTokenEraserMode;
+        if (isTokenEraserMode) {
+            btnTokenEraserToggle.style.background = 'rgba(99, 102, 241, 0.2)';
+            tokenEraserBtnText.textContent = 'Режим Ластика: ВКЛ';
+            tokenEraserControls.style.display = 'flex';
+        } else {
+            btnTokenEraserToggle.style.background = 'transparent';
+            tokenEraserBtnText.textContent = 'Режим Ластика: ВЫКЛ';
+            tokenEraserControls.style.display = 'none';
+        }
+    });
+}
+if (btnTokenEraserClear) {
+    btnTokenEraserClear.addEventListener('click', () => {
+        tokenMaskCtx.clearRect(0, 0, 600, 600);
+        drawToken(tokenCanvas, 600, 600);
+    });
+}
 
 // Token Action Buttons
 btnTokenDownload.addEventListener('click', () => {
@@ -1649,6 +1620,131 @@ document.getElementById('logo-link').addEventListener('click', (e) => {
     bulkScreen.style.display = 'none';
     tokenScreen.style.display = 'none';
 });
+
+
+// --- Eraser Tool Logic ---
+if (btnEraser) {
+    btnEraser.addEventListener('click', () => {
+        if (!processedImageURL) return;
+        
+        eraserImgObj = new Image();
+        eraserImgObj.onload = () => {
+            // Set canvas size to match image aspect ratio, capped at 800px width/height
+            const MAX_DIM = 800;
+            let w = eraserImgObj.width;
+            let h = eraserImgObj.height;
+            if (w > MAX_DIM || h > MAX_DIM) {
+                const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
+                w = w * ratio;
+                h = h * ratio;
+            }
+            
+            eraserCanvas.width = w;
+            eraserCanvas.height = h;
+            
+            eraserCtx = eraserCanvas.getContext('2d');
+            eraserCtx.drawImage(eraserImgObj, 0, 0, w, h);
+            
+            eraserModal.style.display = 'flex';
+        };
+        eraserImgObj.src = processedImageURL;
+    });
+}
+
+if (btnEraserCancel) {
+    btnEraserCancel.addEventListener('click', () => {
+        eraserModal.style.display = 'none';
+    });
+}
+
+
+
+if (btnEraserSave) {
+    btnEraserSave.addEventListener('click', () => {
+        if (!eraserCanvas) return;
+        
+        eraserCanvas.toBlob((blob) => {
+            if (processedImageURL) URL.revokeObjectURL(processedImageURL);
+            processedImageURL = URL.createObjectURL(blob);
+            
+            imgProcessed.src = processedImageURL;
+            cutoutDraggable.src = processedImageURL;
+            
+            if (tokenSourceScreen) {
+                tokenCutoutImage.src = processedImageURL;
+                tokenCutoutImage.onload = () => drawToken(tokenCanvas, 600, 600);
+            }
+            
+            eraserModal.style.display = 'none';
+            showToast('Изменения сохранены');
+        }, 'image/png');
+    });
+}
+
+// Eraser Drawing Handlers
+function getEraserPos(e) {
+    const rect = eraserCanvas.getBoundingClientRect();
+    const scaleX = eraserCanvas.width / rect.width;
+    const scaleY = eraserCanvas.height / rect.height;
+    
+    let clientX = e.clientX;
+    let clientY = e.clientY;
+    
+    if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    }
+    
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+if (eraserCanvas) {
+    const startErasing = (e) => {
+        e.preventDefault();
+        isErasing = true;
+        const pos = getEraserPos(e);
+        eraserCtx.globalCompositeOperation = 'destination-out';
+        eraserCtx.lineCap = 'round';
+        eraserCtx.lineJoin = 'round';
+        eraserCtx.lineWidth = parseInt(eraserSizeSlider.value);
+        eraserCtx.beginPath();
+        eraserCtx.moveTo(pos.x, pos.y);
+    };
+
+    const erase = (e) => {
+        if (!isErasing) return;
+        e.preventDefault();
+        const pos = getEraserPos(e);
+        eraserCtx.lineTo(pos.x, pos.y);
+        eraserCtx.stroke();
+    };
+
+    const stopErasing = () => {
+        if (!isErasing) return;
+        isErasing = false;
+        eraserCtx.closePath();
+    };
+
+    eraserCanvas.addEventListener('mousedown', startErasing);
+    eraserCanvas.addEventListener('mousemove', erase);
+    window.addEventListener('mouseup', stopErasing);
+    
+    eraserCanvas.addEventListener('touchstart', startErasing, {passive: false});
+    eraserCanvas.addEventListener('touchmove', erase, {passive: false});
+    window.addEventListener('touchend', stopErasing);
+}
+
+// Update cursor preview on slider change
+if (eraserSizeSlider) {
+    eraserSizeSlider.addEventListener('input', (e) => {
+        const size = parseInt(e.target.value);
+        // Not adding custom cursor, default crosshair is fine
+    });
+}
+
 
 // --- Initialize App ---
 document.addEventListener('DOMContentLoaded', async () => {

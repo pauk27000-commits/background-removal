@@ -489,12 +489,27 @@ header {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 4px;
-    background: white;
+    width: 40px;
+    margin-left: -20px;
+    background: transparent;
     left: 50%;
     z-index: 4;
     cursor: ew-resize;
+    display: flex;
+    justify-content: center;
+}
+.slider-handle::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: white;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+.layer-original {
+    z-index: 3;
+    clip-path: polygon(0 0, 50% 0, 50% 100%, 0 100%);
 }
 
 .slider-button {

@@ -1,6 +1,8 @@
+node_modules/
 __pycache__/
 *.pyc
 .DS_Store
 .idea/
 .vscode/
 *.log
+syntax_check.txt
