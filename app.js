@@ -251,6 +251,168 @@ function downloadURL(url, filename) {
     document.body.removeChild(a);
 }
 
+function trimTransparentBorders(blob) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(blob);
+        img.src = url;
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            const width = img.width;
+            const height = img.height;
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            let imgData;
+            try {
+                imgData = ctx.getImageData(0, 0, width, height);
+            } catch (e) {
+                console.error("Failed to get image data for trimming:", e);
+                resolve(blob);
+                return;
+            }
+            
+            const data = imgData.data;
+            let minY = height, maxY = -1, minX = width, maxX = -1;
+            
+            const ALPHA_THRESHOLD = 10; // Ignore near-transparent pixels (noise, dust, faint glow)
+            const PADDING = 4;           // Retain small margin for smooth anti-aliasing
+            
+            // Find top border (minY)
+            let found = false;
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    if (data[((y * width) + x) * 4 + 3] > ALPHA_THRESHOLD) {
+                        minY = y;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+            
+            if (!found) {
+                // Image is completely transparent
+                resolve(blob);
+                return;
+            }
+            
+            // Find bottom border (maxY)
+            found = false;
+            for (let y = height - 1; y >= minY; y--) {
+                for (let x = 0; x < width; x++) {
+                    if (data[((y * width) + x) * 4 + 3] > ALPHA_THRESHOLD) {
+                        maxY = y;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+            
+            // Find left border (minX)
+            found = false;
+            for (let x = 0; x < width; x++) {
+                for (let y = minY; y <= maxY; y++) {
+                    if (data[((y * width) + x) * 4 + 3] > ALPHA_THRESHOLD) {
+                        minX = x;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+            
+            // Find right border (maxX)
+            found = false;
+            for (let x = width - 1; x >= minX; x--) {
+                for (let y = minY; y <= maxY; y++) {
+                    if (data[((y * width) + x) * 4 + 3] > ALPHA_THRESHOLD) {
+                        maxX = x;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+
+            // Apply padding to preserve subpixel anti-aliasing
+            minX = Math.max(0, minX - PADDING);
+            minY = Math.max(0, minY - PADDING);
+            maxX = Math.min(width - 1, maxX + PADDING);
+            maxY = Math.min(height - 1, maxY + PADDING);
+            
+            const cropWidth = maxX - minX + 1;
+            const cropHeight = maxY - minY + 1;
+            
+            // Create a new canvas with cropped dimensions
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = cropWidth;
+            cropCanvas.height = cropHeight;
+            const cropCtx = cropCanvas.getContext('2d');
+            
+            // Draw the cropped area
+            cropCtx.drawImage(canvas, minX, minY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+            
+            // Apply soft feathering along the transparent boundaries
+            const finalCanvas = featherEdges(cropCanvas, 1.5);
+            
+            finalCanvas.toBlob((croppedBlob) => {
+                if (croppedBlob) {
+                    resolve(croppedBlob);
+                } else {
+                    resolve(blob);
+                }
+            }, 'image/png');
+        };
+        img.onerror = (err) => {
+            console.error("Image loading failed for trimming:", err);
+            URL.revokeObjectURL(url);
+            resolve(blob);
+        };
+    });
+}
+
+function featherEdges(canvas, radius) {
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    // 1. Create a mask of the image's transparency
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+    const maskCtx = maskCanvas.getContext('2d');
+    maskCtx.drawImage(canvas, 0, 0);
+    maskCtx.globalCompositeOperation = 'source-in';
+    maskCtx.fillStyle = 'black';
+    maskCtx.fillRect(0, 0, width, height);
+    
+    // 2. Create a blurred version of that mask
+    const blurredMaskCanvas = document.createElement('canvas');
+    blurredMaskCanvas.width = width;
+    blurredMaskCanvas.height = height;
+    const blurredMaskCtx = blurredMaskCanvas.getContext('2d');
+    if (typeof blurredMaskCtx.filter === 'string') {
+        blurredMaskCtx.filter = `blur(${radius}px)`;
+    }
+    blurredMaskCtx.drawImage(maskCanvas, 0, 0);
+    
+    // 3. Mask the original image with the blurred transparency mask
+    const resultCanvas = document.createElement('canvas');
+    resultCanvas.width = width;
+    resultCanvas.height = height;
+    const resultCtx = resultCanvas.getContext('2d');
+    resultCtx.drawImage(canvas, 0, 0);
+    resultCtx.globalCompositeOperation = 'destination-in';
+    resultCtx.drawImage(blurredMaskCanvas, 0, 0);
+    
+    return resultCanvas;
+}
+
 // Preload and Process Textured Rings
 function processRingTexture(img) {
     const canvas = document.createElement('canvas');
@@ -545,9 +707,8 @@ async function handleSingleFile(file) {
     imgOriginal.src = originalImageURL;
     
     const exportFilenameInput = document.getElementById('export-filename');
-const exportFilenameTemplate = document.getElementById('export-filename-template');
     if (exportFilenameInput) {
-        exportFilenameInput.value = `${filenamePrefix}_no_bg`;
+        exportFilenameInput.value = filenamePrefix;
     }
     
     showOverlay('Инициализация нейросети...', 0);
@@ -564,8 +725,11 @@ const exportFilenameTemplate = document.getElementById('export-filename-template
             }
         });
         
-        processedImageBlob = blob;
-        processedImageURL = URL.createObjectURL(blob);
+        showOverlay('Обрезание пустых полей...', 95);
+        const trimmedBlob = await trimTransparentBorders(blob);
+        
+        processedImageBlob = trimmedBlob;
+        processedImageURL = URL.createObjectURL(trimmedBlob);
         imgProcessed.src = processedImageURL;
         cutoutDraggable.src = processedImageURL;
         
@@ -724,7 +888,7 @@ btnDownload.addEventListener('click', async () => {
     try {
         const finalURL = await applyBackgroundToCutout(processedImageURL, bgType, bgColor, bgGradient);
         const customNameInput = document.getElementById('export-filename');
-        let finalName = customNameInput && customNameInput.value.trim() !== '' ? customNameInput.value.trim() : `bgrem-${filenamePrefix}`;
+        let finalName = customNameInput && customNameInput.value.trim() !== '' ? customNameInput.value.trim() : filenamePrefix;
         if (!finalName.toLowerCase().endsWith('.png')) finalName += '.png';
         downloadURL(finalURL, finalName);
         hideOverlay();
@@ -805,9 +969,11 @@ async function processNextInBulkQueue() {
             }
         });
         
+        const trimmedBlob = await trimTransparentBorders(blob);
+        
         nextItem.status = 'done';
-        nextItem.processedBlob = blob;
-        nextItem.processedURL = URL.createObjectURL(blob);
+        nextItem.processedBlob = trimmedBlob;
+        nextItem.processedURL = URL.createObjectURL(trimmedBlob);
         renderBulkCard(nextItem);
         
     } catch (err) {

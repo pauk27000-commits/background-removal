@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BgRemover AI - Удаление фона с картинок онлайн</title>
     <meta name="description" content="Удаляйте фон с любых изображений бесплатно и без регистрации. Высокая точность, обработка прямо в браузере с помощью искусственного интеллекта WebAssembly.">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=1.0.2">
 </head>
 <body>
     <div class="container">
@@ -244,12 +244,7 @@
                 <!-- Имя для сохранения -->
                 <div style="margin-bottom: 0.75rem;">
                     <div style="font-size: 0.85rem; margin-bottom: 0.25rem;">Имя файла:</div>
-                    <select id="export-filename-template" style="width: 100%; background: #1f2937; border: 1px solid var(--border-color); color: white; border-radius: var(--radius-sm); padding: 0.5rem; font-size: 0.85rem; outline: none; margin-bottom: 0.5rem; cursor: pointer;">
-                        <option value="original">Как у оригинала (image.png)</option>
-                        <option value="nobg" selected>С припиской _nobg (image_nobg.png)</option>
-                        <option value="custom">Свое имя</option>
-                    </select>
-                    <input type="text" id="export-filename" placeholder="Введите имя..." style="width: 100%; background: var(--bg-surface); border: 1px solid var(--border-color); color: var(--color-text); border-radius: var(--radius-sm); padding: 0.5rem; font-size: 0.85rem; outline: none; display: none;">
+                    <input type="text" id="export-filename" placeholder="Введите имя..." style="width: 100%; background: var(--bg-surface); border: 1px solid var(--border-color); color: var(--color-text); border-radius: var(--radius-sm); padding: 0.5rem; font-size: 0.85rem; outline: none;">
                 </div>
 
                 <!-- Кнопки действий -->
@@ -578,7 +573,7 @@
     </div>
 
     <!-- Подключаем JavaScript-модуль логики -->
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=1.0.3"></script>
 
     <!-- Eraser Modal -->
     <div id="eraser-modal" style="display:none; position:fixed; inset:0; z-index: 9999; background: rgba(15, 17, 26, 0.95); backdrop-filter: blur(10px); flex-direction: column; align-items: center; padding: 2rem;">
